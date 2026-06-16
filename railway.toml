@@ -5,6 +5,5 @@ builder = "dockerfile"
 healthcheckPath = "/healthz"
 restartPolicyType = "on_failure"
 
-[[deploy.volumes]]
-mountPath = "/data"
-name = "notes-data"
+# NOTE: The Volume is created out-of-band with `railway volume add --mount-path /data`
+# (Railway does not provision volumes from this file). SQLite lives at /data/notes.db.
