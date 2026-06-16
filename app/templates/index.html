@@ -1,0 +1,62 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Notes</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; }
+    textarea { width: 100%; height: 5rem; }
+    .space { border: 1px solid #ddd; border-radius: 6px; padding: .75rem; margin: .5rem 0; }
+    .note { padding: .4rem 0; border-bottom: 1px solid #eee; }
+    .flagged { color: #b15; }
+    button { cursor: pointer; }
+    form.inline { display: inline; }
+  </style>
+</head>
+<body>
+  <h1>Notes</h1>
+
+  <form method="post" action="/notes">
+    <textarea name="body" placeholder="Dump a note..." required></textarea>
+    <button type="submit">Add to inbox</button>
+  </form>
+
+  <form method="post" action="/backup">
+    <button type="submit">Back up now</button>
+  </form>
+  {% if backup_msg %}<p>{{ backup_msg }}</p>{% endif %}
+
+  <h2>Inbox ({{ inbox|length }})</h2>
+  {% for n in inbox %}
+    <div class="note {% if n.classified_at %}flagged{% endif %}">
+      {{ n.body }}
+      {% if n.classified_at %}<small>(unsure, conf {{ '%.2f'|format(n.confidence or 0) }})</small>{% endif %}
+      {% if spaces %}
+      <form class="inline" method="post" action="/notes/{{ n.id }}/move">
+        <select name="space_id">
+          <option value="">&mdash; move to &mdash;</option>
+          {% for s in spaces %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}
+        </select>
+        <button type="submit">Move</button>
+      </form>
+      {% endif %}
+    </div>
+  {% endfor %}
+
+  <h2>Spaces</h2>
+  <form method="post" action="/spaces">
+    <input name="name" placeholder="Name" required>
+    <input name="purpose" placeholder="Purpose (what belongs here)" required>
+    <button type="submit">Add space</button>
+  </form>
+  {% for s in spaces %}
+    <div class="space">
+      <strong>{{ s.name }}</strong> &mdash; {{ s.purpose }}
+      <form class="inline" method="post" action="/spaces/{{ s.id }}/delete">
+        <button type="submit">Delete</button>
+      </form>
+      {% for n in s.notes %}<div class="note">{{ n.body }}</div>{% endfor %}
+    </div>
+  {% endfor %}
+</body>
+</html>
