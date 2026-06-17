@@ -1,62 +1,268 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Notes</title>
-  <style>
-    body { font-family: system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; }
-    textarea { width: 100%; height: 5rem; }
-    .space { border: 1px solid #ddd; border-radius: 6px; padding: .75rem; margin: .5rem 0; }
-    .note { padding: .4rem 0; border-bottom: 1px solid #eee; }
-    .flagged { color: #b15; }
-    button { cursor: pointer; }
-    form.inline { display: inline; }
-  </style>
+  <script>
+    // no-FOUC: set theme before first paint
+    (function () {
+      var t = localStorage.getItem("notes-theme") ||
+        (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+      document.documentElement.dataset.theme = t;
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-  <h1>Notes</h1>
+  <div class="app" id="app">
 
-  <form method="post" action="/notes">
-    <textarea name="body" placeholder="Dump a note..." required></textarea>
-    <button type="submit">Add to inbox</button>
-  </form>
+    <!-- ================= Sidebar ================= -->
+    <aside class="sidebar" id="sidebar">
+      <div class="side-top">
+        <button class="brand" id="brandToggle" title="Collapse sidebar">
+          <span class="brand-mark">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M5 4h11l3 3v13H5z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 12h6M9 16h6M9 8h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </span>
+          <span class="brand-name">Notes</span>
+        </button>
+      </div>
 
-  <form method="post" action="/backup">
-    <button type="submit">Back up now</button>
-  </form>
-  {% if backup_msg %}<p>{{ backup_msg }}</p>{% endif %}
+      <nav class="side-scroll">
+        <div class="nav-group">
+          <div class="nav-label">Spaces
+            <button class="nav-add" id="newSpaceBtn" title="New space">+</button>
+          </div>
+          <form id="newSpaceForm" class="hidden" method="post" action="/spaces" style="padding:4px 6px 8px; display:flex; flex-direction:column; gap:6px;">
+            <input class="text-input" name="name" placeholder="Space name" required style="height:34px;">
+            <input class="text-input" name="purpose" placeholder="Purpose (what belongs here)" required style="height:34px;">
+            <button class="btn btn-primary" type="submit" style="height:34px;">Create space</button>
+          </form>
 
-  <h2>Inbox ({{ inbox|length }})</h2>
-  {% for n in inbox %}
-    <div class="note {% if n.classified_at %}flagged{% endif %}">
-      {{ n.body }}
-      {% if n.classified_at %}<small>(unsure, conf {{ '%.2f'|format(n.confidence or 0) }})</small>{% endif %}
-      {% if spaces %}
-      <form class="inline" method="post" action="/notes/{{ n.id }}/move">
-        <select name="space_id">
-          <option value="">&mdash; move to &mdash;</option>
-          {% for s in spaces %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}
-        </select>
-        <button type="submit">Move</button>
-      </form>
-      {% endif %}
+          <button class="nav-item" data-view="inbox">
+            <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none"><path d="M4 13l2.5-7h11L20 13M4 13v5h16v-5M4 13h5l1.5 2.5h3L14 13h6" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg></span>
+            <span class="nav-txt">Inbox</span>
+            <span class="nav-count">{{ inbox|length }}</span>
+          </button>
+
+          {% for s in spaces %}
+          <button class="nav-item" data-view="space" data-space="{{ s.id }}">
+            <span class="nav-ico"><span class="dot" style="background: hsl({{ (s.id * 67) % 360 }} 72% 60%);"></span></span>
+            <span class="nav-txt">{{ s.name }}</span>
+            <span class="nav-count">{{ s.notes|length }}</span>
+          </button>
+          {% endfor %}
+        </div>
+      </nav>
+
+      <div class="side-bottom">
+        <button class="nav-item" data-view="settings">
+          <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 6.6 19l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.6 1.6 0 0 0 3 13.6H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 7L4.5 6.9a2 2 0 1 1 2.8-2.8l.1.1A1.6 1.6 0 0 0 10 3.1V3a2 2 0 1 1 4 0v.1A1.6 1.6 0 0 0 17 4.6l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.6 1.6 0 0 0 21 9.4H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg></span>
+          <span class="nav-txt">Settings</span>
+        </button>
+        <button class="nav-item" data-view="account">
+          <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="2"/><path d="M4 20c0-3.3 3.6-6 8-6s8 2.7 8 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>
+          <span class="nav-txt">Account</span>
+        </button>
+        <button class="theme-toggle" id="themeToggle">
+          <svg class="sun" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="4.5" stroke="currentColor" stroke-width="2"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          <svg class="moon" viewBox="0 0 24 24" fill="none"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+          <span class="theme-label">Theme</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- ================= Main ================= -->
+    <main class="main">
+      <header class="topbar">
+        <button class="icon-btn" id="sidebarToggle" title="Toggle sidebar">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+
+        <div class="search-wrap">
+          <div class="search-field">
+            <svg viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3.2-3.2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <input id="search" type="text" placeholder="Search notes…" autocomplete="off" spellcheck="false">
+            <span class="regex-toggle" id="regexToggle" title="Toggle regex">.*</span>
+            <span class="kbd">⌘K</span>
+          </div>
+
+          <div class="search-panel" id="searchPanel">
+            <div class="sp-results" id="searchResults"></div>
+            <div class="replace-bar">
+              <div class="replace-row">
+                <input class="replace-input" id="replaceInput" placeholder="Replace with…" autocomplete="off">
+              </div>
+              <div class="replace-row">
+                <select class="scope-select" id="scopeSelect" title="Replace scope">
+                  <option value="everywhere">Everywhere</option>
+                  <option value="space">This space</option>
+                  <option value="note">This note</option>
+                </select>
+                <button class="btn" id="btnReplace" title="Replace in the focused note">Replace</button>
+                <button class="btn btn-primary" id="btnReplaceAll">Replace all…</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="topbar-right">
+          <span class="tag {{ '' if classifier_on else 'flag' }}" title="AI classifier status">
+            {{ '● AI on' if classifier_on else '○ AI off' }}
+          </span>
+        </div>
+      </header>
+
+      <div class="scroll-area">
+
+        <!-- ===== Notes view ===== -->
+        <section class="view" id="view-notes">
+          <div class="page-head">
+            <div class="eyebrow" id="eyebrow">Capture</div>
+            <h1 class="page-title" id="viewTitle">Inbox</h1>
+            <p class="page-sub" id="viewSub">Everything lands here. The AI files confident notes and flags the rest.</p>
+          </div>
+
+          <form class="composer" id="composer" method="post" action="/notes">
+            <textarea name="body" placeholder="Dump a note…  (it lands in the inbox; the AI sorts it)" required></textarea>
+            <div class="composer-bar">
+              <span class="composer-hint">Plain text or markdown</span>
+              <button class="btn btn-primary" type="submit">Add to inbox</button>
+            </div>
+          </form>
+
+          <div class="notes stagger" id="notesFeed">
+            {% macro note_card(n, status, space_id) %}
+            <article class="note-card {{ 'flagged' if n.classified_at and status == 'inbox' else '' }}"
+                     data-note-id="{{ n.id }}" data-status="{{ status }}" data-space-id="{{ space_id if space_id is not none else '' }}">
+              <div class="note-body">{{ n.body }}</div>
+              <div class="note-foot">
+                {% if status == 'inbox' and n.classified_at %}
+                  <span class="tag flag">flagged · <span class="conf">{{ '%.2f'|format(n.confidence or 0) }}</span></span>
+                {% elif status == 'filed' %}
+                  <span class="tag"><span class="dot" style="background: hsl({{ (space_id * 67) % 360 }} 72% 60%);"></span> filed{% if n.confidence %} · <span class="conf">{{ '%.2f'|format(n.confidence) }}</span>{% endif %}</span>
+                {% endif %}
+                <div class="note-actions">
+                  <form method="post" action="/notes/{{ n.id }}/move">
+                    <select class="mini-select" name="space_id" onchange="this.form.submit()">
+                      <option value="">move…</option>
+                      <option value="">↑ Inbox</option>
+                      {% for s in spaces %}<option value="{{ s.id }}" {{ 'selected' if s.id == space_id else '' }}>{{ s.name }}</option>{% endfor %}
+                    </select>
+                  </form>
+                  <form method="post" action="/notes/{{ n.id }}/delete">
+                    <button class="mini-btn" type="submit" title="Delete note">
+                      <svg viewBox="0 0 24 24" fill="none"><path d="M5 7h14M10 7V5h4v2M6 7l1 13h10l1-13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                  </form>
+                </div>
+              </div>
+            </article>
+            {% endmacro %}
+
+            {% for n in inbox %}{{ note_card(n, 'inbox', none) }}{% endfor %}
+            {% for s in spaces %}{% for n in s.notes %}{{ note_card(n, 'filed', s.id) }}{% endfor %}{% endfor %}
+          </div>
+
+          <div class="empty-state" id="emptyState" style="display:none;">
+            <div class="big">Nothing here yet</div>
+            <div>Notes you add land in the inbox and get filed automatically.</div>
+          </div>
+        </section>
+
+        <!-- ===== Settings view ===== -->
+        <section class="view hidden" id="view-settings">
+          <div class="page-head">
+            <div class="eyebrow">Preferences</div>
+            <h1 class="page-title">Settings</h1>
+          </div>
+
+          <div class="panel">
+            <h2>Appearance</h2>
+            <p class="desc">Theme follows your system by default. Use the toggle at the bottom of the sidebar to switch — your choice is remembered on this device.</p>
+          </div>
+
+          <div class="panel">
+            <h2>Spaces</h2>
+            <p class="desc">Spaces are the buckets the AI files notes into, matched against each space's purpose.</p>
+            <form method="post" action="/spaces" class="field-row" style="margin-bottom:14px;">
+              <input class="text-input" name="name" placeholder="Name" required style="width:160px;">
+              <input class="text-input" name="purpose" placeholder="Purpose" required style="flex:1; min-width:200px;">
+              <button class="btn btn-primary" type="submit">Add space</button>
+            </form>
+            {% for s in spaces %}
+            <div class="space-row">
+              <span class="dot" style="background: hsl({{ (s.id * 67) % 360 }} 72% 60%);"></span>
+              <span class="nm">{{ s.name }}</span>
+              <span class="pp">{{ s.purpose }}</span>
+              <form method="post" action="/spaces/{{ s.id }}/delete">
+                <button class="btn btn-danger btn-ghost" type="submit">Delete</button>
+              </form>
+            </div>
+            {% else %}
+            <p class="desc">No spaces yet.</p>
+            {% endfor %}
+          </div>
+
+          <div class="panel">
+            <h2>Data &amp; Backup</h2>
+            <p class="desc">Notes live in a single SQLite file on the Railway volume. Back up an off-site snapshot to S3 on demand.</p>
+            <form method="post" action="/backup" class="field-row">
+              <button class="btn btn-primary" type="submit">Back up now</button>
+              {% if not cfg.s3_bucket %}<span class="desc" style="margin:0;">S3 not configured — set S3_BUCKET + credentials.</span>{% endif %}
+            </form>
+            {% if backup_msg %}<div class="toast">{{ backup_msg }}</div>{% endif %}
+          </div>
+
+          <div class="panel">
+            <h2>Classifier</h2>
+            <div class="kv"><span class="k">AI classifier</span><span class="v">{{ 'on' if classifier_on else 'off (no API key)' }}</span></div>
+            <div class="kv"><span class="k">Auto-file threshold</span><span class="v">{{ cfg.classify_threshold }}</span></div>
+            <div class="kv"><span class="k">Poll interval</span><span class="v">{{ cfg.classify_interval_seconds }}s</span></div>
+            <div class="kv"><span class="k">Backup retention</span><span class="v">{{ cfg.backup_retention }} snapshots</span></div>
+          </div>
+        </section>
+
+        <!-- ===== Account view ===== -->
+        <section class="view hidden" id="view-account">
+          <div class="page-head">
+            <div class="eyebrow">You</div>
+            <h1 class="page-title">Account</h1>
+          </div>
+          <div class="panel">
+            <h2>Single-user mode</h2>
+            <p class="desc">This instance runs without sign-in — it's meant to sit behind Cloudflare Access. Multi-user accounts are a planned addition.</p>
+            <div class="kv"><span class="k">Mode</span><span class="v">single-user</span></div>
+            <div class="kv"><span class="k">Auth</span><span class="v">external (Cloudflare Access)</span></div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <!-- ===== Replace preview modal ===== -->
+  <div class="modal-backdrop" id="replaceModal">
+    <div class="modal">
+      <div class="modal-head">
+        <h3 id="modalTitle">Replace</h3>
+        <p id="modalSub"></p>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+      <div class="modal-foot">
+        <span class="count" id="modalCount"></span>
+        <button class="btn btn-ghost" id="btnCancelReplace">Cancel</button>
+        <button class="btn btn-primary" id="btnConfirmReplace">Replace &amp; save</button>
+      </div>
     </div>
-  {% endfor %}
+  </div>
 
-  <h2>Spaces</h2>
-  <form method="post" action="/spaces">
-    <input name="name" placeholder="Name" required>
-    <input name="purpose" placeholder="Purpose (what belongs here)" required>
-    <button type="submit">Add space</button>
-  </form>
-  {% for s in spaces %}
-    <div class="space">
-      <strong>{{ s.name }}</strong> &mdash; {{ s.purpose }}
-      <form class="inline" method="post" action="/spaces/{{ s.id }}/delete">
-        <button type="submit">Delete</button>
-      </form>
-      {% for n in s.notes %}<div class="note">{{ n.body }}</div>{% endfor %}
-    </div>
-  {% endfor %}
+  <script id="bootstrap" type="application/json">
+    {"spaces": [{% for s in spaces %}{"id": {{ s.id }}, "name": {{ s.name|tojson }}, "purpose": {{ s.purpose|tojson }}}{{ "," if not loop.last }}{% endfor %}]}
+  </script>
+  <script src="/static/app.js"></script>
 </body>
 </html>

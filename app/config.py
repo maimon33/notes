@@ -12,6 +12,7 @@ class Config:
     s3_region: str | None
     s3_endpoint_url: str | None
     backup_retention: int
+    seed_demo: bool
 
 
 def load() -> Config:
@@ -24,4 +25,5 @@ def load() -> Config:
         s3_region=os.getenv("S3_REGION"),
         s3_endpoint_url=os.getenv("S3_ENDPOINT_URL"),
         backup_retention=int(os.getenv("BACKUP_RETENTION", "7")),
+        seed_demo=os.getenv("SEED_DEMO", "").lower() in ("1", "true", "yes"),
     )
