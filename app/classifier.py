@@ -1,7 +1,10 @@
 import json
+import logging
 from dataclasses import dataclass, field
 
 from app import db
+
+log = logging.getLogger("notes")
 
 
 @dataclass
@@ -78,7 +81,12 @@ def process_inbox(conn, classify_fn, threshold: float) -> int:
     valid = {s["id"] for s in spaces}
     processed = 0
     for note in db.unclassified_notes(conn):
-        result = classify_fn(note["body"], spaces)
+        try:
+            result = classify_fn(note["body"], spaces)
+        except Exception:
+            # one bad note (API/schema/key error) must not stall the batch — log and skip
+            log.exception("classify failed for note %s", note["id"])
+            continue
         ranked = [s for s in result.ranked if s.space_id in valid][:5]
         suggestions = {
             "ranked": [{"space_id": s.space_id, "confidence": s.confidence} for s in ranked],
