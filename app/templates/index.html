@@ -142,10 +142,10 @@
             <form class="composer" id="composer" method="post" action="/notes">
               <textarea name="body" placeholder="Dump a note…  (it lands here; the AI suggests where it goes)" required></textarea>
               <div class="composer-bar">
-                <label class="private-toggle" title="Skip the AI for this note">
+                <label class="private-toggle" title="Keep this note in manual review instead of sending it to the AI">
                   <input type="checkbox" name="private" value="on">
                   <span class="lock"><svg viewBox="0 0 24 24" fill="none"><rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="2"/></svg></span>
-                  Private (no AI)
+                  Manual review
                 </label>
                 <button class="btn btn-primary" type="submit">Add note</button>
               </div>
@@ -184,14 +184,24 @@
 
             {% if private_pending %}
             <div class="inbox-section">
-              <div class="section-label">Private &amp; pending <span class="n">{{ private_pending|length }}</span></div>
+              <div class="section-label">Manual &amp; pending <span class="n">{{ private_pending|length }}</span><span class="section-hint">{{ "move these yourself" if not classifier_on else "manual notes stay out of AI" }}</span></div>
               {% for n in private_pending %}
               <article class="note-card inbox-row collapsed {{ 'is-private' if n.private else '' }}" data-note-id="{{ n.id }}" data-status="inbox" data-space-id="">
                 <div class="note-body">{{ n.body }}</div>
                 <div class="row-foot">
                   {% if n.private %}
-                    <span class="filed-label"><span class="lock-ico"><svg viewBox="0 0 24 24" fill="none"><rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="2"/></svg></span> private</span>
+                    <span class="filed-label"><span class="lock-ico"><svg viewBox="0 0 24 24" fill="none"><rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="2"/></svg></span> manual review</span>
                     <div class="row-actions"><button class="chip chip-move move-btn" type="button">Move</button></div>
+                    <div class="chip-reveal hidden">
+                      <div class="chip-row">
+                        {% for s in spaces %}
+                        <form method="post" action="/notes/{{ n.id }}/file" class="chip-form"><input type="hidden" name="space_id" value="{{ s.id }}"><button class="chip" type="submit"><span class="dot" style="background:hsl({{ (s.id*67)%360 }} 72% 60%)"></span>{{ s.name }}</button></form>
+                        {% endfor %}
+                      </div>
+                    </div>
+                  {% elif not classifier_on %}
+                    <span class="filed-label">AI is off</span>
+                    <div class="row-actions"><button class="chip chip-move move-btn" type="button">File now</button></div>
                     <div class="chip-reveal hidden">
                       <div class="chip-row">
                         {% for s in spaces %}
@@ -237,7 +247,7 @@
         <!-- ===== Settings view ===== -->
         <section class="view hidden" id="view-settings">
           <div class="page-head"><div class="eyebrow">Preferences</div><h1 class="page-title">Settings</h1></div>
-          <div class="panel"><h2>Appearance</h2><p class="desc">Theme follows your system by default. Toggle at the bottom of the sidebar — your choice is remembered on this device.</p></div>
+          <div class="panel"><h2>Appearance</h2><p class="desc">Theme follows your system by default. On mobile, the sidebar footer stays pinned so Theme, Settings, and Account are always reachable.</p></div>
           <div class="panel">
             <h2>Spaces</h2>
             <p class="desc">The buckets the AI files notes into, matched against each space's purpose.</p>

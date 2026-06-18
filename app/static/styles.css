@@ -262,6 +262,7 @@ body {
 .sp-meta { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
 .sp-empty { padding: 26px 16px; text-align: center; color: var(--muted); font-size: 14px; }
 mark { background: var(--highlight-bg); color: inherit; border-radius: 3px; padding: 0 1px; }
+.note-body mark { box-shadow: 0 0 0 1px color-mix(in srgb, var(--warn) 28%, transparent); }
 
 /* replace bar inside search panel */
 .replace-bar { border-top: 1px solid var(--border); padding: 12px; background: var(--surface-2); }
@@ -503,8 +504,17 @@ mark { background: var(--highlight-bg); color: inherit; border-radius: 3px; padd
   .sidebar {
     position: fixed; z-index: 60; width: min(86vw, var(--sidebar-w)); height: 100dvh;
     box-shadow: var(--shadow-lg); transform: translateX(-100%); transition: transform 0.3s var(--ease);
+    overflow-y: auto;
   }
   .app.mobile-open .sidebar { transform: none; }
+  .side-scroll { flex: 0 0 auto; min-height: auto; overflow: visible; }
+  .side-bottom {
+    position: sticky;
+    bottom: 0;
+    margin-top: auto;
+    background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 82%, transparent), var(--surface));
+    padding-bottom: calc(14px + env(safe-area-inset-bottom));
+  }
   .scrim { display: block; position: fixed; inset: 0; z-index: 55; background: rgba(3, 6, 12, 0.55); opacity: 0; pointer-events: none; transition: opacity 0.3s var(--ease); }
   .app.mobile-open .scrim { opacity: 1; pointer-events: auto; }
 
@@ -517,6 +527,8 @@ mark { background: var(--highlight-bg); color: inherit; border-radius: 3px; padd
   .view { padding: 22px 14px calc(80px + env(safe-area-inset-bottom)); }
   .page-title { font-size: 30px; }
   .composer textarea { font-size: 16px; }     /* avoids iOS zoom-on-focus */
+  .composer-bar { align-items: flex-start; gap: 12px; flex-direction: column; }
+  .private-toggle { font-size: 13.5px; }
 
   .chip { padding: 9px 14px; font-size: 13.5px; }   /* comfortable tap targets */
   .chip-keep, .chip-move { padding: 9px 18px; }

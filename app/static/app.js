@@ -144,7 +144,14 @@
     else setView("inbox");
     const target = firstCard(id);
     cards().forEach((x) => x.classList.remove("focused"));
-    if (target) { target.classList.remove("collapsed"); target.classList.add("focused"); focusedId = id; target.scrollIntoView({ behavior: "smooth", block: "center" }); }
+    clearNoteHighlights();
+    if (target) {
+      target.classList.remove("collapsed");
+      target.classList.add("focused");
+      focusedId = id;
+      highlightNoteBody(target, buildPattern(searchInput.value));
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
     closePanel();
   }
   searchInput?.addEventListener("input", () => { clearTimeout(st); st = setTimeout(runSearch, 170); });
@@ -209,6 +216,21 @@
     if (!res.ok) { const e = await res.json().catch(() => ({})); alert(e.error || "Replace failed"); return; }
     location.reload();
   });
+
+  function clearNoteHighlights() {
+    $$(".note-body[data-raw-text]").forEach((body) => {
+      body.textContent = body.dataset.rawText || body.textContent;
+      delete body.dataset.rawText;
+    });
+  }
+
+  function highlightNoteBody(card, pat) {
+    const body = $(".note-body", card);
+    if (!body) return;
+    const raw = body.dataset.rawText || body.textContent || "";
+    body.dataset.rawText = raw;
+    body.innerHTML = pat ? hl(raw, pat) : escHtml(raw);
+  }
 
   // ---- init ----------------------------------------------------------------
   applyTheme(currentTheme());
