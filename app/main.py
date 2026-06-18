@@ -41,12 +41,31 @@ def _seed_demo(conn) -> None:
     work = db.create_space(conn, "Work", "Job, clients, meetings, standups, deadlines")
     recipes = db.create_space(conn, "Recipes", "Food, cooking, ingredients, meals")
     ideas = db.create_space(conn, "Ideas", "Product ideas, side projects, things to build")
-    db.file_note(conn, db.add_note(conn, "Standup at 9:30 — demo the new search panel"), work, 0.93)
-    db.file_note(conn, db.add_note(conn, "Follow up with client re: Q3 invoice (todo)"), work, 0.88)
-    db.file_note(conn, db.add_note(conn, "Pasta dough: 100g flour per egg, rest 30 min"), recipes, 0.95)
-    db.file_note(conn, db.add_note(conn, "Build a notes app that auto-files with AI"), ideas, 0.91)
+
+    # recently filed (awaiting keep/move) — with alternates so Move shows chips
+    n1 = db.add_note(conn, "Standup at 9:30 — demo the new search panel")
+    db.file_note(conn, n1, work, 0.93)
+    db.set_suggestions(conn, n1, {"ranked": [{"space_id": work, "confidence": 0.93}, {"space_id": ideas, "confidence": 0.31}], "new_space": None})
+    n2 = db.add_note(conn, "Pasta dough: 100g flour per egg, rest 30 min")
+    db.file_note(conn, n2, recipes, 0.95)
+    db.set_suggestions(conn, n2, {"ranked": [{"space_id": recipes, "confidence": 0.95}], "new_space": None})
+
+    # already kept (lives only in its space)
+    db.file_note(conn, db.add_note(conn, "Build a notes app that auto-files with AI"), ideas, 0.91, confirmed=True)
+
+    # needs sorting — low confidence, multiple candidate chips
+    n3 = db.add_note(conn, "random thought — could be work or a side project?")
+    db.flag_note(conn, n3, 0.45)
+    db.set_suggestions(conn, n3, {"ranked": [{"space_id": work, "confidence": 0.45}, {"space_id": ideas, "confidence": 0.4}], "new_space": None})
+
+    # needs sorting — nothing fits, AI proposes a new space
+    n4 = db.add_note(conn, "flights to Lisbon in October, find a hotel near Alfama")
+    db.flag_note(conn, n4, 0.2)
+    db.set_suggestions(conn, n4, {"ranked": [], "new_space": {"name": "Travel", "purpose": "Trips, flights, hotels, itineraries"}})
+
+    # private (no AI) + pending
+    db.add_note(conn, "ID number and gate code — keep this private", private=True)
     db.add_note(conn, "buy milk, eggs, bread")
-    db.flag_note(conn, db.add_note(conn, "random thought — could be work or ideas?"), 0.42)
 
 
 def create_app(conn=None, cfg=None) -> FastAPI:
@@ -78,8 +97,11 @@ def create_app(conn=None, cfg=None) -> FastAPI:
             request,
             "index.html",
             {
-                "inbox": db.inbox_notes(conn),
+                "recently_filed": db.recently_filed(conn),
+                "needs_sorting": db.needs_sorting(conn),
+                "private_pending": db.private_and_pending(conn),
                 "spaces": spaces,
+                "spaces_by_id": {s["id"]: s for s in spaces},
                 "backup_msg": msg,
                 "cfg": cfg,
                 "classifier_on": bool(cfg.anthropic_api_key),
@@ -87,8 +109,24 @@ def create_app(conn=None, cfg=None) -> FastAPI:
         )
 
     @app.post("/notes")
-    def add_note(body: str = Form(...)):
-        db.add_note(conn, body)
+    def add_note(body: str = Form(...), private: str = Form("")):
+        db.add_note(conn, body, private=bool(private))
+        return RedirectResponse("/", status_code=303)
+
+    @app.post("/notes/{note_id}/keep")
+    def keep_note(note_id: int):
+        db.keep_note(conn, note_id)
+        return RedirectResponse("/", status_code=303)
+
+    @app.post("/notes/{note_id}/file")
+    def file_note(note_id: int, space_id: int = Form(...)):
+        db.file_note(conn, note_id, space_id, None, confirmed=True)
+        return RedirectResponse("/", status_code=303)
+
+    @app.post("/notes/{note_id}/file-new")
+    def file_note_new(note_id: int, name: str = Form(...), purpose: str = Form(...)):
+        sid = db.create_space(conn, name, purpose)
+        db.file_note(conn, note_id, sid, None, confirmed=True)
         return RedirectResponse("/", status_code=303)
 
     @app.post("/spaces")
