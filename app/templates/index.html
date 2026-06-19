@@ -142,12 +142,11 @@
             <form class="composer" id="composer" method="post" action="/notes">
               <textarea name="body" placeholder="Dump a note…  (it lands here; the AI suggests where it goes)" required></textarea>
               <div class="composer-bar">
-                <label class="private-toggle" title="Keep this note in manual review instead of sending it to the AI">
-                  <input type="checkbox" name="private" value="on">
-                  <span class="lock"><svg viewBox="0 0 24 24" fill="none"><rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="2"/></svg></span>
-                  Manual review
-                </label>
-                <button class="btn btn-primary" type="submit">Add note</button>
+                <span class="composer-hint">Capture first. You can file it yourself immediately, or let AI suggest a home.</span>
+                <div class="composer-actions">
+                  <button class="btn" type="submit" name="manual" value="1">Hold here</button>
+                  <button class="btn btn-primary" type="submit">Add note</button>
+                </div>
               </div>
             </form>
 
@@ -184,14 +183,14 @@
 
             {% if private_pending %}
             <div class="inbox-section">
-              <div class="section-label">Manual &amp; pending <span class="n">{{ private_pending|length }}</span><span class="section-hint">{{ "move these yourself" if not classifier_on else "manual notes stay out of AI" }}</span></div>
+              <div class="section-label">Waiting here <span class="n">{{ private_pending|length }}</span><span class="section-hint">{{ "file these yourself" if not classifier_on else "you can file these immediately" }}</span></div>
               {% for n in private_pending %}
               <article class="note-card inbox-row collapsed {{ 'is-private' if n.private else '' }}" data-note-id="{{ n.id }}" data-status="inbox" data-space-id="">
                 <div class="note-body">{{ n.body }}</div>
                 <div class="row-foot">
                   {% if n.private %}
-                    <span class="filed-label"><span class="lock-ico"><svg viewBox="0 0 24 24" fill="none"><rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="2"/></svg></span> manual review</span>
-                    <div class="row-actions"><button class="chip chip-move move-btn" type="button">Move</button></div>
+                    <span class="filed-label">held here</span>
+                    {% if spaces %}<div class="row-actions"><button class="chip chip-move move-btn" type="button">Move now</button></div>{% endif %}
                     <div class="chip-reveal hidden">
                       <div class="chip-row">
                         {% for s in spaces %}
@@ -201,7 +200,7 @@
                     </div>
                   {% elif not classifier_on %}
                     <span class="filed-label">AI is off</span>
-                    <div class="row-actions"><button class="chip chip-move move-btn" type="button">File now</button></div>
+                    {% if spaces %}<div class="row-actions"><button class="chip chip-move move-btn" type="button">File now</button></div>{% endif %}
                     <div class="chip-reveal hidden">
                       <div class="chip-row">
                         {% for s in spaces %}
@@ -211,6 +210,14 @@
                     </div>
                   {% else %}
                     <span class="filed-label muted-label"><span class="spin"></span> sorting…</span>
+                    {% if spaces %}<div class="row-actions"><button class="chip chip-move move-btn" type="button">Move now</button></div>{% endif %}
+                    <div class="chip-reveal hidden">
+                      <div class="chip-row">
+                        {% for s in spaces %}
+                        <form method="post" action="/notes/{{ n.id }}/file" class="chip-form"><input type="hidden" name="space_id" value="{{ s.id }}"><button class="chip" type="submit"><span class="dot" style="background:hsl({{ (s.id*67)%360 }} 72% 60%)"></span>{{ s.name }}</button></form>
+                        {% endfor %}
+                      </div>
+                    </div>
                   {% endif %}
                 </div>
               </article>

@@ -26,13 +26,13 @@ def test_add_note_then_shows_in_inbox(monkeypatch):
     assert pending[0]["private"] == 0
 
 
-def test_add_private_note(monkeypatch):
+def test_add_manual_note(monkeypatch):
     client, conn = client_with_memory(monkeypatch)
-    r = client.post("/notes", data={"body": "secret", "private": "on"}, follow_redirects=False)
+    r = client.post("/notes", data={"body": "secret", "manual": "1"}, follow_redirects=False)
     assert r.status_code == 303
     note = db.private_and_pending(conn)[0]
     assert note["private"] == 1
-    # private notes are never handed to the classifier
+    # manually held notes are never handed to the classifier
     assert db.unclassified_notes(conn) == []
 
 

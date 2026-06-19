@@ -109,8 +109,10 @@ def create_app(conn=None, cfg=None) -> FastAPI:
         )
 
     @app.post("/notes")
-    def add_note(body: str = Form(...), private: str = Form("")):
-        db.add_note(conn, body, private=bool(private))
+    def add_note(body: str = Form(...), manual: str = Form(""), private: str = Form("")):
+        # Keep `private` for backward compatibility with existing forms/tests, but
+        # the product language is now "hold here" / manual routing rather than privacy.
+        db.add_note(conn, body, private=bool(manual or private))
         return RedirectResponse("/", status_code=303)
 
     @app.post("/notes/{note_id}/keep")
