@@ -160,6 +160,7 @@
                   <span class="filed-label">filed to <span class="dot" style="background:hsl({{ (sp.id*67)%360 if sp else 0 }} 72% 60%)"></span>{{ sp.name if sp else '—' }}</span>
                   <div class="row-actions">
                     <form method="post" action="/notes/{{ n.id }}/keep" class="chip-form"><button class="chip chip-keep" type="submit">Keep</button></form>
+                    <button class="chip chip-edit edit-btn" type="button">Edit</button>
                     <button class="chip chip-move move-btn" type="button">Move</button>
                   </div>
                   <div class="chip-reveal hidden">{{ chips(n) }}</div>
@@ -175,7 +176,11 @@
               {% for n in needs_sorting %}
               <article class="note-card inbox-row collapsed" data-note-id="{{ n.id }}" data-status="inbox" data-space-id="">
                 <div class="note-body">{{ n.body }}</div>
-                <div class="row-foot">{{ chips(n) }}</div>
+                <div class="row-foot">
+                  <span class="filed-label">choose a space</span>
+                  <div class="row-actions"><button class="chip chip-edit edit-btn" type="button">Edit</button><button class="chip chip-move move-btn" type="button">Move</button></div>
+                  <div class="chip-reveal hidden">{{ chips(n) }}</div>
+                </div>
               </article>
               {% endfor %}
             </div>
@@ -190,7 +195,7 @@
                 <div class="row-foot">
                   {% if n.private %}
                     <span class="filed-label">held here</span>
-                    {% if spaces %}<div class="row-actions"><button class="chip chip-move move-btn" type="button">Move now</button></div>{% endif %}
+                    <div class="row-actions"><button class="chip chip-edit edit-btn" type="button">Edit</button>{% if spaces %}<button class="chip chip-move move-btn" type="button">Move now</button>{% endif %}</div>
                     <div class="chip-reveal hidden">
                       <div class="chip-row">
                         {% for s in spaces %}
@@ -200,7 +205,7 @@
                     </div>
                   {% elif not classifier_on %}
                     <span class="filed-label">AI is off</span>
-                    {% if spaces %}<div class="row-actions"><button class="chip chip-move move-btn" type="button">File now</button></div>{% endif %}
+                    <div class="row-actions"><button class="chip chip-edit edit-btn" type="button">Edit</button>{% if spaces %}<button class="chip chip-move move-btn" type="button">File now</button>{% endif %}</div>
                     <div class="chip-reveal hidden">
                       <div class="chip-row">
                         {% for s in spaces %}
@@ -210,7 +215,7 @@
                     </div>
                   {% else %}
                     <span class="filed-label muted-label"><span class="spin"></span> sorting…</span>
-                    {% if spaces %}<div class="row-actions"><button class="chip chip-move move-btn" type="button">Move now</button></div>{% endif %}
+                    <div class="row-actions"><button class="chip chip-edit edit-btn" type="button">Edit</button>{% if spaces %}<button class="chip chip-move move-btn" type="button">Move now</button>{% endif %}</div>
                     <div class="chip-reveal hidden">
                       <div class="chip-row">
                         {% for s in spaces %}
@@ -240,9 +245,11 @@
                   <div class="note-foot">
                     {% if not n.confirmed %}<span class="tag flag">awaiting keep</span>{% endif %}
                     <div class="note-actions">
-                      <form method="post" action="/notes/{{ n.id }}/move"><select class="mini-select" name="space_id" onchange="this.form.submit()"><option value="">move…</option><option value="">↑ Inbox</option>{% for t in spaces %}<option value="{{ t.id }}" {{ 'selected' if t.id == s.id else '' }}>{{ t.name }}</option>{% endfor %}</select></form>
+                      <button class="chip chip-edit edit-btn" type="button">Edit</button>
+                      <button class="chip chip-move move-btn" type="button">Move</button>
                       <form method="post" action="/notes/{{ n.id }}/delete"><button class="mini-btn" type="submit" title="Delete"><svg viewBox="0 0 24 24" fill="none"><path d="M5 7h14M10 7V5h4v2M6 7l1 13h10l1-13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button></form>
                     </div>
+                    <div class="chip-reveal hidden">{{ chips(n) }}</div>
                   </div>
                 </article>{% endfor %}</div>
               {% else %}<div class="empty-state"><div class="big">No notes yet</div><div>Notes filed here will appear in this space.</div></div>{% endif %}
@@ -295,6 +302,84 @@
       <div class="modal-head"><h3 id="modalTitle">Replace</h3><p id="modalSub"></p></div>
       <div class="modal-body" id="modalBody"></div>
       <div class="modal-foot"><span class="count" id="modalCount"></span><button class="btn btn-ghost" id="btnCancelReplace">Cancel</button><button class="btn btn-primary" id="btnConfirmReplace">Replace &amp; save</button></div>
+    </div>
+  </div>
+
+  <div class="editor-shell" id="editorShell" aria-hidden="true">
+    <div class="editor-panel">
+      <div class="editor-topbar">
+        <div class="editor-left">
+          <span class="editor-tab">editing note</span>
+          <span class="editor-meta" id="editorMeta">0 words</span>
+          <span class="editor-dirty hidden" id="editorDirty">unsaved</span>
+        </div>
+        <div class="editor-right">
+          <div class="tool-group">
+            <label class="tool-label" for="editorTextType">Type</label>
+            <select class="tool-select" id="editorTextType">
+              <option value="body">Body</option>
+              <option value="h1">Heading 1</option>
+              <option value="h2">Heading 2</option>
+              <option value="h3">Heading 3</option>
+              <option value="quote">Quote</option>
+              <option value="code">Code block</option>
+            </select>
+          </div>
+          <div class="tool-group">
+            <label class="tool-label" for="editorFont">Font</label>
+            <select class="tool-select" id="editorFont">
+              <option value="mono">Mono</option>
+              <option value="sans">Sans</option>
+              <option value="serif">Serif</option>
+            </select>
+          </div>
+          <div class="tool-group">
+            <label class="tool-label" for="editorSpacing">Spacing</label>
+            <select class="tool-select" id="editorSpacing">
+              <option value="1.5">Tight</option>
+              <option value="1.7" selected>Normal</option>
+              <option value="2">Loose</option>
+            </select>
+          </div>
+          <div class="tool-group">
+            <label class="tool-label" for="editorWidth">Width</label>
+            <select class="tool-select" id="editorWidth">
+              <option value="720px">Narrow</option>
+              <option value="860px" selected>Reading</option>
+              <option value="100%">Wide</option>
+            </select>
+          </div>
+          <div class="tool-group tool-buttons">
+            <button class="tool-btn" type="button" data-insert="bullet">Bullets</button>
+            <button class="tool-btn" type="button" data-insert="numbered">List</button>
+            <button class="tool-btn" type="button" data-insert="table">Table</button>
+            <button class="tool-btn" type="button" data-insert="media">Media</button>
+          </div>
+          <div class="tool-group tool-buttons">
+            <button class="tool-btn" type="button" data-transform="tighten">Tighten</button>
+            <button class="tool-btn" type="button" data-transform="organize">Organize</button>
+            <button class="tool-btn" type="button" data-transform="sort">Sort</button>
+            <button class="tool-btn" type="button" data-transform="titleize">Title</button>
+          </div>
+          <span class="editor-spacer"></span>
+          <button class="btn btn-ghost" type="button" id="editorCancel">Cancel</button>
+          <button class="btn btn-primary" type="button" id="editorSave">Save</button>
+        </div>
+      </div>
+      <div class="editor-subbar">
+        <span class="editor-path">functions live here so cleanup and editing happen in one flow</span>
+        <span class="editor-count" id="editorCount">1 line</span>
+      </div>
+      <div class="editor-workspace" id="editorWorkspace">
+        <div class="editor-pane editor-pane-write">
+          <div class="editor-pane-head">Editor</div>
+          <textarea class="editor-textarea" id="editorTextarea" spellcheck="true"></textarea>
+        </div>
+        <div class="editor-pane editor-pane-preview">
+          <div class="editor-pane-head">Preview</div>
+          <div class="editor-preview markdown-body" id="editorPreview"></div>
+        </div>
+      </div>
     </div>
   </div>
 

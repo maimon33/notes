@@ -70,6 +70,13 @@ def test_move_note_manual():
     assert note["confirmed"] == 1  # a manual move is an explicit confirmation
 
 
+def test_update_note_body():
+    conn = make_conn()
+    nid = db.add_note(conn, "draft")
+    db.update_note_body(conn, nid, "revised")
+    assert db.get_note(conn, nid)["body"] == "revised"
+
+
 def test_private_note_skipped_by_classifier_query():
     conn = make_conn()
     db.add_note(conn, "public")

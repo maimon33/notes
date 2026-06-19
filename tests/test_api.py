@@ -77,6 +77,22 @@ def test_file_new_endpoint_creates_space(monkeypatch):
     assert note["confirmed"] == 1
 
 
+def test_note_update_api(monkeypatch):
+    client, conn = client_with_memory(monkeypatch)
+    nid = db.add_note(conn, "old text")
+    r = client.post(f"/api/notes/{nid}", json={"body": "new text"})
+    assert r.status_code == 200
+    assert db.get_note(conn, nid)["body"] == "new text"
+
+
+def test_note_transform_api(monkeypatch):
+    client, conn = client_with_memory(monkeypatch)
+    nid = db.add_note(conn, "todo buy milk\n\n\nhttps://example.com")
+    r = client.post(f"/api/notes/{nid}/transform", json={"body": db.get_note(conn, nid)["body"], "mode": "sort"})
+    assert r.status_code == 200
+    assert "## Tasks" in r.json()["body"]
+
+
 def test_index_renders(monkeypatch):
     client, conn = client_with_memory(monkeypatch)
     db.add_note(conn, "hello world note")

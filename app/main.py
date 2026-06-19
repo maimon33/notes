@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from app import backup, classifier, config, db, search
+from app import backup, classifier, config, db, search, transform
 
 BASE = Path(__file__).parent
 TEMPLATES = Jinja2Templates(directory=str(BASE / "templates"))
@@ -25,6 +25,15 @@ class ReplaceRequest(BaseModel):
     space_id: int | None = None
     note_id: int | None = None
     note_ids: list[int] | None = None  # explicit subset (checked rows) on apply
+
+
+class NoteUpdateRequest(BaseModel):
+    body: str
+
+
+class TransformRequest(BaseModel):
+    body: str
+    mode: str
 
 
 def _scope_note_ids(conn, scope: str, space_id: int | None, note_id: int | None) -> list[int]:
@@ -175,6 +184,32 @@ def create_app(conn=None, cfg=None) -> FastAPI:
         except re.error as e:
             return JSONResponse({"error": f"Invalid regex: {e}"}, status_code=400)
         return {"matches": matches}
+
+    @app.get("/api/notes/{note_id}")
+    def api_note(note_id: int):
+        note = db.get_note(conn, note_id)
+        if not note:
+            return JSONResponse({"error": "Note not found"}, status_code=404)
+        return {"note": note}
+
+    @app.post("/api/notes/{note_id}")
+    def api_note_update(note_id: int, req: NoteUpdateRequest):
+        note = db.get_note(conn, note_id)
+        if not note:
+            return JSONResponse({"error": "Note not found"}, status_code=404)
+        db.update_note_body(conn, note_id, req.body)
+        return {"ok": True, "note": db.get_note(conn, note_id)}
+
+    @app.post("/api/notes/{note_id}/transform")
+    def api_note_transform(note_id: int, req: TransformRequest):
+        note = db.get_note(conn, note_id)
+        if not note:
+            return JSONResponse({"error": "Note not found"}, status_code=404)
+        try:
+            body = transform.apply_transform(req.body, req.mode)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return {"body": body}
 
     @app.post("/api/replace/preview")
     def api_replace_preview(req: ReplaceRequest):

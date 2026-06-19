@@ -66,9 +66,16 @@
 
   // ---- collapse + move reveal (event-delegated) ----------------------------
   document.addEventListener("click", (e) => {
+    const editBtn = e.target.closest(".edit-btn");
+    if (editBtn) {
+      const card = editBtn.closest(".note-card");
+      if (card) openEditor(Number(card.dataset.noteId), card);
+      return;
+    }
     const moveBtn = e.target.closest(".move-btn");
     if (moveBtn) {
-      const reveal = moveBtn.closest(".row-foot")?.querySelector(".chip-reveal");
+      const container = moveBtn.closest(".row-foot, .note-foot");
+      const reveal = container?.querySelector(".chip-reveal");
       reveal?.classList.toggle("hidden");
       return;
     }
@@ -80,6 +87,11 @@
       else focusedId = null;
       refreshScopeOptions();
     }
+  });
+  document.addEventListener("dblclick", (e) => {
+    const card = e.target.closest(".note-card");
+    if (!card || e.target.closest("form, button, select, input, textarea")) return;
+    openEditor(Number(card.dataset.noteId), card);
   });
   // focus a space card for "this note" scope
   $$("#spaceView .note-card").forEach((c) => c.addEventListener("click", (e) => {
@@ -232,7 +244,265 @@
     body.innerHTML = pat ? hl(raw, pat) : escHtml(raw);
   }
 
+  // ---- editor --------------------------------------------------------------
+  const editorShell = $("#editorShell");
+  const editorTextarea = $("#editorTextarea");
+  const editorMeta = $("#editorMeta");
+  const editorCount = $("#editorCount");
+  const editorDirty = $("#editorDirty");
+  const editorSave = $("#editorSave");
+  const editorPreview = $("#editorPreview");
+  const editorWorkspace = $("#editorWorkspace");
+  const editorFont = $("#editorFont");
+  const editorSpacing = $("#editorSpacing");
+  const editorWidth = $("#editorWidth");
+  const editorTextType = $("#editorTextType");
+  let editingNoteId = null;
+  let editingCard = null;
+  let savedBody = "";
+
+  function countWords(text) {
+    return (text.trim().match(/\S+/g) || []).length;
+  }
+
+  function countLines(text) {
+    return Math.max(1, text.split("\n").length);
+  }
+
+  function refreshEditorMeta() {
+    const text = editorTextarea.value;
+    editorMeta.textContent = `${countWords(text)} words`;
+    editorCount.textContent = `${countLines(text)} line${countLines(text) === 1 ? "" : "s"}`;
+    editorDirty.classList.toggle("hidden", text === savedBody);
+    renderEditorPreview(text);
+  }
+
+  function esc(text) {
+    return escHtml(text).replace(/\n/g, "<br>");
+  }
+
+  function renderInline(text) {
+    return escHtml(text)
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/\*(.+?)\*/g, "<em>$1</em>")
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<span class="media-inline">$1</span>')
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+  }
+
+  function renderTable(lines) {
+    const rows = lines.map((line) => line.split("|").slice(1, -1).map((cell) => renderInline(cell.trim())));
+    if (rows.length < 2) return `<p>${rows.map((r) => r.join(" | ")).join("<br>")}</p>`;
+    const head = rows[0].map((cell) => `<th>${cell}</th>`).join("");
+    const bodyRows = rows.slice(2).map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("");
+    return `<table><thead><tr>${head}</tr></thead><tbody>${bodyRows}</tbody></table>`;
+  }
+
+  function renderBlocks(text) {
+    const lines = text.split("\n");
+    let i = 0;
+    const blocks = [];
+    while (i < lines.length) {
+      const line = lines[i];
+      const trimmed = line.trim();
+      if (!trimmed) { i += 1; continue; }
+      if (trimmed.startsWith("```")) {
+        const code = [];
+        i += 1;
+        while (i < lines.length && !lines[i].trim().startsWith("```")) { code.push(lines[i]); i += 1; }
+        i += 1;
+        blocks.push(`<pre><code>${escHtml(code.join("\n"))}</code></pre>`);
+        continue;
+      }
+      if (/^# /.test(trimmed)) { blocks.push(`<h1>${renderInline(trimmed.slice(2))}</h1>`); i += 1; continue; }
+      if (/^## /.test(trimmed)) { blocks.push(`<h2>${renderInline(trimmed.slice(3))}</h2>`); i += 1; continue; }
+      if (/^### /.test(trimmed)) { blocks.push(`<h3>${renderInline(trimmed.slice(4))}</h3>`); i += 1; continue; }
+      if (/^> /.test(trimmed)) {
+        const quote = [];
+        while (i < lines.length && /^> /.test(lines[i].trim())) { quote.push(renderInline(lines[i].trim().slice(2))); i += 1; }
+        blocks.push(`<blockquote>${quote.join("<br>")}</blockquote>`);
+        continue;
+      }
+      if (/^[-*] /.test(trimmed)) {
+        const items = [];
+        while (i < lines.length && /^[-*] /.test(lines[i].trim())) { items.push(`<li>${renderInline(lines[i].trim().slice(2))}</li>`); i += 1; }
+        blocks.push(`<ul>${items.join("")}</ul>`);
+        continue;
+      }
+      if (/^\d+\. /.test(trimmed)) {
+        const items = [];
+        while (i < lines.length && /^\d+\. /.test(lines[i].trim())) { items.push(`<li>${renderInline(lines[i].trim().replace(/^\d+\.\s*/, ""))}</li>`); i += 1; }
+        blocks.push(`<ol>${items.join("")}</ol>`);
+        continue;
+      }
+      if (/^\|.*\|$/.test(trimmed)) {
+        const tableLines = [];
+        while (i < lines.length && /^\|.*\|$/.test(lines[i].trim())) { tableLines.push(lines[i].trim()); i += 1; }
+        blocks.push(renderTable(tableLines));
+        continue;
+      }
+      if (/^!\[([^\]]*)\]\(([^)]+)\)/.test(trimmed)) {
+        const match = trimmed.match(/^!\[([^\]]*)\]\(([^)]+)\)/);
+        const alt = match?.[1] || "media";
+        const url = match?.[2] || "";
+        const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(url);
+        blocks.push(`<div class="media-block"><div class="media-label">Media</div><div>${renderInline(trimmed)}</div>${isImage ? `<img src="${url}" alt="${escHtml(alt)}">` : ""}</div>`);
+        i += 1;
+        continue;
+      }
+      const para = [];
+      while (i < lines.length && lines[i].trim() && !/^(#{1,3} |> |[-*] |\d+\. |\|.*\||```|!\[)/.test(lines[i].trim())) { para.push(lines[i]); i += 1; }
+      blocks.push(`<p>${renderInline(para.join(" "))}</p>`);
+    }
+    return blocks.join("");
+  }
+
+  function renderEditorPreview(text) {
+    if (!editorPreview) return;
+    const fontClass = `font-${editorFont?.value || "mono"}`;
+    editorPreview.className = `editor-preview markdown-body ${fontClass}`;
+    editorPreview.innerHTML = `<div class="editor-preview-inner">${renderBlocks(text || "") || "<p>Nothing yet. Use the toolbar to add headings, lists, tables, or media.</p>"}</div>`;
+  }
+
+  function applyEditorPreferences() {
+    if (!editorTextarea || !editorPreview || !editorWorkspace) return;
+    const font = editorFont?.value || "mono";
+    editorTextarea.classList.remove("font-mono", "font-sans", "font-serif");
+    editorTextarea.classList.add(`font-${font}`);
+    editorWorkspace.style.setProperty("--editor-line-height", editorSpacing?.value || "1.7");
+    editorWorkspace.style.setProperty("--editor-content-width", editorWidth?.value || "860px");
+    renderEditorPreview(editorTextarea.value);
+  }
+
+  function wrapSelection(prefix, suffix = "", placeholder = "text") {
+    const start = editorTextarea.selectionStart;
+    const end = editorTextarea.selectionEnd;
+    const selected = editorTextarea.value.slice(start, end) || placeholder;
+    const next = `${editorTextarea.value.slice(0, start)}${prefix}${selected}${suffix}${editorTextarea.value.slice(end)}`;
+    editorTextarea.value = next;
+    const cursorStart = start + prefix.length;
+    const cursorEnd = cursorStart + selected.length;
+    editorTextarea.focus();
+    editorTextarea.setSelectionRange(cursorStart, cursorEnd);
+    refreshEditorMeta();
+  }
+
+  function prefixLines(prefix) {
+    const start = editorTextarea.selectionStart;
+    const end = editorTextarea.selectionEnd;
+    const value = editorTextarea.value;
+    const blockStart = value.lastIndexOf("\n", start - 1) + 1;
+    const blockEnd = value.indexOf("\n", end);
+    const sliceEnd = blockEnd === -1 ? value.length : blockEnd;
+    const selected = value.slice(blockStart, sliceEnd);
+    const replaced = selected.split("\n").map((line, idx) => {
+      if (!line.trim()) return line;
+      return typeof prefix === "function" ? prefix(line, idx) : `${prefix}${line}`;
+    }).join("\n");
+    editorTextarea.value = `${value.slice(0, blockStart)}${replaced}${value.slice(sliceEnd)}`;
+    editorTextarea.focus();
+    editorTextarea.setSelectionRange(blockStart, blockStart + replaced.length);
+    refreshEditorMeta();
+  }
+
+  function insertTemplate(kind) {
+    if (kind === "bullet") return prefixLines("- ");
+    if (kind === "numbered") return prefixLines((_line, idx) => `${idx + 1}. `);
+    if (kind === "table") return wrapSelection("| Column A | Column B |\n| --- | --- |\n| Value | Value |\n", "", "");
+    if (kind === "media") return wrapSelection("![Alt text](https://example.com/media.jpg)", "", "");
+  }
+
+  function applyTextType(kind) {
+    if (kind === "body") return;
+    if (kind === "h1") return prefixLines("# ");
+    if (kind === "h2") return prefixLines("## ");
+    if (kind === "h3") return prefixLines("### ");
+    if (kind === "quote") return prefixLines("> ");
+    if (kind === "code") return wrapSelection("```\n", "\n```", "code");
+  }
+
+  function syncCardBody(noteId, body) {
+    cards()
+      .filter((card) => Number(card.dataset.noteId) === noteId)
+      .forEach((card) => {
+        const bodyEl = $(".note-body", card);
+        if (!bodyEl) return;
+        bodyEl.textContent = body;
+        bodyEl.dataset.rawText = body;
+      });
+  }
+
+  async function openEditor(noteId, card) {
+    const res = await fetch(`/api/notes/${noteId}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    editingNoteId = noteId;
+    editingCard = card;
+    savedBody = data.note.body || "";
+    editorTextarea.value = savedBody;
+    applyEditorPreferences();
+    refreshEditorMeta();
+    editorShell.classList.add("open");
+    editorShell.setAttribute("aria-hidden", "false");
+    setTimeout(() => editorTextarea.focus(), 10);
+  }
+
+  function closeEditor() {
+    editorShell.classList.remove("open");
+    editorShell.setAttribute("aria-hidden", "true");
+    editingNoteId = null;
+    editingCard = null;
+    savedBody = "";
+  }
+
+  $("#editorCancel")?.addEventListener("click", closeEditor);
+  editorShell?.addEventListener("click", (e) => {
+    if (e.target === editorShell) closeEditor();
+  });
+  editorTextarea?.addEventListener("input", refreshEditorMeta);
+  editorFont?.addEventListener("change", applyEditorPreferences);
+  editorSpacing?.addEventListener("change", applyEditorPreferences);
+  editorWidth?.addEventListener("change", applyEditorPreferences);
+  editorTextType?.addEventListener("change", () => {
+    applyTextType(editorTextType.value);
+    editorTextType.value = "body";
+  });
+
+  editorSave?.addEventListener("click", async () => {
+    if (editingNoteId == null) return;
+    const res = await fetch(`/api/notes/${editingNoteId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body: editorTextarea.value }),
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    savedBody = data.note.body || editorTextarea.value;
+    syncCardBody(editingNoteId, savedBody);
+    if (editingCard) {
+      editingCard.classList.remove("collapsed");
+      editingCard.classList.add("focused");
+    }
+    refreshEditorMeta();
+    closeEditor();
+  });
+
+  $$("[data-transform]").forEach((btn) => btn.addEventListener("click", async () => {
+    if (editingNoteId == null) return;
+    const res = await fetch(`/api/notes/${editingNoteId}/transform`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body: editorTextarea.value, mode: btn.dataset.transform }),
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    editorTextarea.value = data.body || editorTextarea.value;
+    refreshEditorMeta();
+  }));
+  $$("[data-insert]").forEach((btn) => btn.addEventListener("click", () => insertTemplate(btn.dataset.insert)));
+
   // ---- init ----------------------------------------------------------------
   applyTheme(currentTheme());
+  applyEditorPreferences();
   setView("inbox");
 })();

@@ -104,6 +104,11 @@ def get_note(conn, note_id: int) -> dict | None:
     return _row(conn.execute("SELECT * FROM notes WHERE id=?", (note_id,)).fetchone())
 
 
+def update_note_body(conn, note_id: int, body: str) -> None:
+    conn.execute("UPDATE notes SET body=? WHERE id=?", (body, note_id))
+    conn.commit()
+
+
 def _rows(cur) -> list[dict]:
     return [_row(r) for r in cur]
 
