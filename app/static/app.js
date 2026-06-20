@@ -253,13 +253,19 @@
   const editorSave = $("#editorSave");
   const editorPreview = $("#editorPreview");
   const editorWorkspace = $("#editorWorkspace");
+  const editorPanel = $(".editor-panel", editorShell);
   const editorFont = $("#editorFont");
   const editorSpacing = $("#editorSpacing");
   const editorWidth = $("#editorWidth");
   const editorTextType = $("#editorTextType");
+  const editorToggleChrome = $("#editorToggleChrome");
+  const editorTogglePreview = $("#editorTogglePreview");
+  const EDITOR_CHROME_KEY = "notes.editor.controlsHidden.v2";
   let editingNoteId = null;
   let editingCard = null;
   let savedBody = "";
+  let editorControlsHidden = false;
+  let editorPreviewVisible = false;
 
   function countWords(text) {
     return (text.trim().match(/\S+/g) || []).length;
@@ -352,7 +358,7 @@
       }
       const para = [];
       while (i < lines.length && lines[i].trim() && !/^(#{1,3} |> |[-*] |\d+\. |\|.*\||```|!\[)/.test(lines[i].trim())) { para.push(lines[i]); i += 1; }
-      blocks.push(`<p>${renderInline(para.join(" "))}</p>`);
+      blocks.push(`<p>${para.map((line) => renderInline(line)).join("<br>")}</p>`);
     }
     return blocks.join("");
   }
@@ -372,6 +378,38 @@
     editorWorkspace.style.setProperty("--editor-line-height", editorSpacing?.value || "1.7");
     editorWorkspace.style.setProperty("--editor-content-width", editorWidth?.value || "860px");
     renderEditorPreview(editorTextarea.value);
+  }
+
+  function applyEditorChromeState(hidden) {
+    editorControlsHidden = Boolean(hidden);
+    editorPanel?.classList.toggle("controls-collapsed", editorControlsHidden);
+    if (editorToggleChrome) {
+      editorToggleChrome.textContent = editorControlsHidden ? "Show tools" : "Hide tools";
+      editorToggleChrome.setAttribute("aria-pressed", editorControlsHidden ? "true" : "false");
+    }
+    try {
+      window.localStorage.setItem(EDITOR_CHROME_KEY, editorControlsHidden ? "1" : "0");
+    } catch (_err) {
+      // Ignore storage failures and keep the in-memory state.
+    }
+  }
+
+  function loadEditorChromeState() {
+    try {
+      const stored = window.localStorage.getItem(EDITOR_CHROME_KEY);
+      return stored == null ? true : stored === "1";
+    } catch (_err) {
+      return true;
+    }
+  }
+
+  function applyEditorPreviewState(visible) {
+    editorPreviewVisible = Boolean(visible);
+    editorWorkspace?.classList.toggle("preview-hidden", !editorPreviewVisible);
+    if (editorTogglePreview) {
+      editorTogglePreview.textContent = editorPreviewVisible ? "Hide preview" : "Show preview";
+      editorTogglePreview.setAttribute("aria-pressed", editorPreviewVisible ? "true" : "false");
+    }
   }
 
   function wrapSelection(prefix, suffix = "", placeholder = "text") {
@@ -440,6 +478,10 @@
     editingCard = card;
     savedBody = data.note.body || "";
     editorTextarea.value = savedBody;
+    editorControlsHidden = loadEditorChromeState();
+    editorPreviewVisible = false;
+    applyEditorChromeState(editorControlsHidden);
+    applyEditorPreviewState(editorPreviewVisible);
     applyEditorPreferences();
     refreshEditorMeta();
     editorShell.classList.add("open");
@@ -463,6 +505,8 @@
   editorFont?.addEventListener("change", applyEditorPreferences);
   editorSpacing?.addEventListener("change", applyEditorPreferences);
   editorWidth?.addEventListener("change", applyEditorPreferences);
+  editorToggleChrome?.addEventListener("click", () => applyEditorChromeState(!editorControlsHidden));
+  editorTogglePreview?.addEventListener("click", () => applyEditorPreviewState(!editorPreviewVisible));
   editorTextType?.addEventListener("change", () => {
     applyTextType(editorTextType.value);
     editorTextType.value = "body";
@@ -503,6 +547,10 @@
 
   // ---- init ----------------------------------------------------------------
   applyTheme(currentTheme());
+  editorControlsHidden = loadEditorChromeState();
+  editorPreviewVisible = false;
+  applyEditorChromeState(editorControlsHidden);
+  applyEditorPreviewState(editorPreviewVisible);
   applyEditorPreferences();
   setView("inbox");
 })();
