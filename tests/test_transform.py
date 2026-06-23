@@ -19,3 +19,9 @@ def test_sort_text_groups_content():
     assert "## Links" in out
     assert "## Questions" in out
     assert "## Notes" in out
+
+
+def test_dedupe_text_removes_repeated_lines_and_sections():
+    body = "Buy milk\nBuy milk\n\nIdea A\n\nIdea A"
+    out = transform.dedupe_text(body)
+    assert out == "Buy milk\n\nIdea A"

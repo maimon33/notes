@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/styles.css?v=20260620d">
+  <link rel="stylesheet" href="/static/styles.css?v=20260623b">
 </head>
 <body>
   <div class="app" id="app">
@@ -280,9 +280,54 @@
           </div>
           <div class="panel">
             <h2>Classifier</h2>
-            <div class="kv"><span class="k">AI classifier</span><span class="v">{{ 'on' if classifier_on else 'off (no API key)' }}</span></div>
+            <div class="kv"><span class="k">AI classifier</span><span class="v">{{ 'on' if classifier_on else 'off (no AI token)' }}</span></div>
+            <div class="kv"><span class="k">Active provider</span><span class="v">{{ ai_provider_label }}</span></div>
             <div class="kv"><span class="k">Auto-file threshold</span><span class="v">{{ cfg.classify_threshold }}</span></div>
             <div class="kv"><span class="k">Poll interval</span><span class="v">{{ cfg.classify_interval_seconds }}s</span></div>
+          </div>
+          <div class="panel">
+            <h2>AI Providers</h2>
+            <p class="desc">Supply tokens for whichever models you want available. The app uses the selected provider for auto-filing and duplicate spotting. Tokens are stored in this app's SQLite database for this instance.</p>
+            <form method="post" action="/settings/ai">
+              <div class="field-row" style="margin-bottom:14px;">
+                <label class="provider-field" for="ai_provider">
+                  <span class="k">Active provider</span>
+                  <select class="text-input" id="ai_provider" name="ai_provider" style="min-width:220px;">
+                    <option value="">Auto-pick first available</option>
+                    {% for provider in provider_names %}
+                    <option value="{{ provider }}" {{ 'selected' if stored_settings.get('ai_provider') == provider else '' }}>{{ provider_names[provider] }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+              </div>
+              {% for provider in provider_names %}
+              <div class="provider-card">
+                <div class="provider-head">
+                  <div>
+                    <div class="provider-name">{{ provider_names[provider] }}</div>
+                    <div class="provider-sub">{{ 'configured' if provider in configured_providers else 'not configured yet' }}</div>
+                  </div>
+                </div>
+                <div class="field-row">
+                  <input class="text-input" type="password" name="{{ provider }}_api_key" value="{{ stored_settings.get(provider + '_api_key', '') }}" placeholder="{{ provider_names[provider] }} API token" style="flex:1; min-width:240px;">
+                  <input class="text-input" name="{{ provider }}_model" value="{{ stored_settings.get(provider + '_model', default_models[provider]) }}" placeholder="Model" style="width:220px;">
+                </div>
+              </div>
+              {% endfor %}
+              <div class="field-row" style="margin-top:14px;">
+                <button class="btn btn-primary" type="submit">Save AI settings</button>
+                {% if settings_msg %}<span class="toast" style="margin:0;">{{ settings_msg }}</span>{% endif %}
+              </div>
+            </form>
+          </div>
+          <div class="panel">
+            <h2>Duplicates</h2>
+            <p class="desc">Scan notes for duplicate or near-duplicate entries. When AI is configured, the app asks your selected provider to confirm patterns; otherwise it falls back to similarity heuristics.</p>
+            <div class="field-row" style="margin-bottom:14px;">
+              <button class="btn" type="button" id="scanDuplicatesBtn">Scan for duplicates</button>
+              <span class="desc" id="duplicatesStatus" style="margin:0;">No scan yet.</span>
+            </div>
+            <div id="duplicatesResults" class="duplicate-results"></div>
           </div>
         </section>
 
@@ -310,56 +355,85 @@
       <div class="editor-topbar">
         <div class="editor-left">
           <span class="editor-tab">editing note</span>
-          <span class="editor-meta" id="editorMeta">0 words</span>
           <span class="editor-dirty hidden" id="editorDirty">unsaved</span>
+          <div class="editor-popover-wrap">
+            <button class="editor-info-btn" type="button" id="editorInfoToggle" aria-expanded="false" aria-label="Editor info">i</button>
+            <div class="editor-popover editor-info-panel hidden" id="editorInfoPanel">
+              <div class="info-row"><span class="info-label">Words</span><span class="info-value" id="editorMeta">0 words</span></div>
+              <div class="info-row"><span class="info-label">Lines</span><span class="info-value" id="editorCount">1 line</span></div>
+            </div>
+          </div>
         </div>
         <div class="editor-right">
-          <div class="tool-group">
-            <label class="tool-label" for="editorTextType">Type</label>
-            <select class="tool-select" id="editorTextType">
-              <option value="body">Body</option>
-              <option value="h1">Heading 1</option>
-              <option value="h2">Heading 2</option>
-              <option value="h3">Heading 3</option>
-              <option value="quote">Quote</option>
-              <option value="code">Code block</option>
-            </select>
+          <div class="tool-group editor-popover-wrap">
+            <button class="tool-btn editor-menu-trigger" type="button" id="editorFormatToggle" aria-expanded="false">Format</button>
+            <div class="editor-popover editor-menu hidden" id="editorFormatMenu">
+              <div class="editor-menu-section">
+                <div class="editor-menu-title">Text</div>
+                <label class="tool-label" for="editorTextType">Type</label>
+                <select class="tool-select" id="editorTextType">
+                  <option value="body">Body</option>
+                  <option value="h1">Heading 1</option>
+                  <option value="h2">Heading 2</option>
+                  <option value="h3">Heading 3</option>
+                  <option value="quote">Quote</option>
+                  <option value="code">Code block</option>
+                </select>
+              </div>
+              <div class="editor-menu-section">
+                <label class="tool-label" for="editorFont">Font</label>
+                <select class="tool-select" id="editorFont">
+                  <option value="mono">Mono</option>
+                  <option value="sans">Sans</option>
+                  <option value="serif">Serif</option>
+                </select>
+              </div>
+            </div>
           </div>
-          <div class="tool-group">
-            <label class="tool-label" for="editorFont">Font</label>
-            <select class="tool-select" id="editorFont">
-              <option value="mono">Mono</option>
-              <option value="sans">Sans</option>
-              <option value="serif">Serif</option>
-            </select>
+          <div class="tool-group editor-popover-wrap">
+            <button class="tool-btn editor-menu-trigger" type="button" id="editorPageToggle" aria-expanded="false">Page</button>
+            <div class="editor-popover editor-menu hidden" id="editorPageMenu">
+              <div class="editor-menu-section">
+                <div class="editor-menu-title">Layout</div>
+                <label class="tool-label" for="editorSpacing">Spacing</label>
+                <select class="tool-select" id="editorSpacing">
+                  <option value="1.5">Tight</option>
+                  <option value="1.7" selected>Normal</option>
+                  <option value="2">Loose</option>
+                </select>
+              </div>
+              <div class="editor-menu-section">
+                <label class="tool-label" for="editorWidth">Width</label>
+                <select class="tool-select" id="editorWidth">
+                  <option value="720px">Narrow</option>
+                  <option value="860px" selected>Reading</option>
+                  <option value="100%">Wide</option>
+                </select>
+              </div>
+            </div>
           </div>
-          <div class="tool-group">
-            <label class="tool-label" for="editorSpacing">Spacing</label>
-            <select class="tool-select" id="editorSpacing">
-              <option value="1.5">Tight</option>
-              <option value="1.7" selected>Normal</option>
-              <option value="2">Loose</option>
-            </select>
-          </div>
-          <div class="tool-group">
-            <label class="tool-label" for="editorWidth">Width</label>
-            <select class="tool-select" id="editorWidth">
-              <option value="720px">Narrow</option>
-              <option value="860px" selected>Reading</option>
-              <option value="100%">Wide</option>
-            </select>
-          </div>
-          <div class="tool-group tool-buttons">
-            <button class="tool-btn" type="button" data-insert="bullet">Bullets</button>
-            <button class="tool-btn" type="button" data-insert="numbered">List</button>
-            <button class="tool-btn" type="button" data-insert="table">Table</button>
-            <button class="tool-btn" type="button" data-insert="media">Media</button>
-          </div>
-          <div class="tool-group tool-buttons">
-            <button class="tool-btn" type="button" data-transform="tighten">Tighten</button>
-            <button class="tool-btn" type="button" data-transform="organize">Organize</button>
-            <button class="tool-btn" type="button" data-transform="sort">Sort</button>
-            <button class="tool-btn" type="button" data-transform="titleize">Title</button>
+          <div class="tool-group editor-popover-wrap">
+            <button class="tool-btn actions-trigger editor-menu-trigger" type="button" id="editorActionsToggle" aria-expanded="false">Actions</button>
+            <div class="editor-popover actions-menu hidden" id="editorActionsMenu">
+              <div class="actions-section editor-menu-section">
+                <div class="actions-title editor-menu-title">Review</div>
+                <button class="actions-item" type="button" data-transform="dedupe">Spot duplicates</button>
+                <button class="actions-item" type="button" data-transform="sort">Extract tasks and sections</button>
+                <button class="actions-item" type="button" data-transform="titleize">Add a title</button>
+              </div>
+              <div class="actions-section editor-menu-section">
+                <div class="actions-title editor-menu-title">Clean Up</div>
+                <button class="actions-item" type="button" data-transform="tighten">Tighten spacing</button>
+                <button class="actions-item" type="button" data-transform="organize">Add section structure</button>
+              </div>
+              <div class="actions-section editor-menu-section">
+                <div class="actions-title editor-menu-title">Insert</div>
+                <button class="actions-item" type="button" data-insert="bullet">Bullets</button>
+                <button class="actions-item" type="button" data-insert="numbered">Numbered list</button>
+                <button class="actions-item" type="button" data-insert="table">Table</button>
+                <button class="actions-item" type="button" data-insert="media">Media block</button>
+              </div>
+            </div>
           </div>
           <span class="editor-spacer"></span>
           <div class="editor-actions">
@@ -368,10 +442,6 @@
             <button class="btn btn-primary" type="button" id="editorSave">Save</button>
           </div>
         </div>
-      </div>
-      <div class="editor-subbar">
-        <span class="editor-path">functions live here so cleanup and editing happen in one flow</span>
-        <span class="editor-count" id="editorCount">1 line</span>
       </div>
       <div class="editor-workspace" id="editorWorkspace">
         <div class="editor-pane editor-pane-write">
@@ -392,6 +462,6 @@
   <script id="bootstrap" type="application/json">
     {"spaces": [{% for s in spaces %}{"id": {{ s.id }}, "name": {{ s.name|tojson }}, "purpose": {{ s.purpose|tojson }}}{{ "," if not loop.last }}{% endfor %}]}
   </script>
-  <script src="/static/app.js?v=20260620c"></script>
+  <script src="/static/app.js?v=20260623b"></script>
 </body>
 </html>

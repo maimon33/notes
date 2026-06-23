@@ -67,8 +67,47 @@ def sort_text(body: str) -> str:
     return "\n\n".join(parts) if parts else text
 
 
+def dedupe_text(body: str) -> str:
+    text = tighten_text(body)
+    if not text:
+        return text
+
+    sections = [section.strip() for section in re.split(r"\n\s*\n", text) if section.strip()]
+    if len(sections) > 1:
+        kept_sections = []
+        seen_sections = set()
+        for section in sections:
+            normalized = _normalize_duplicate_key(section)
+            if normalized in seen_sections:
+                continue
+            seen_sections.add(normalized)
+            kept_sections.append(section)
+        return "\n\n".join(_dedupe_lines(section) for section in kept_sections)
+
+    return _dedupe_lines(text)
+
+
+def _dedupe_lines(text: str) -> str:
+    lines = text.splitlines()
+    kept = []
+    seen = set()
+    for line in lines:
+        normalized = _normalize_duplicate_key(line)
+        if normalized and normalized in seen:
+            continue
+        if normalized:
+            seen.add(normalized)
+        kept.append(line)
+    return "\n".join(kept).strip()
+
+
+def _normalize_duplicate_key(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
 def apply_transform(body: str, mode: str) -> str:
     transforms = {
+        "dedupe": dedupe_text,
         "tighten": tighten_text,
         "organize": organize_text,
         "sort": sort_text,

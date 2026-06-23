@@ -77,6 +77,13 @@ def test_update_note_body():
     assert db.get_note(conn, nid)["body"] == "revised"
 
 
+def test_settings_round_trip():
+    conn = make_conn()
+    db.set_settings(conn, {"ai_provider": "openai", "openai_model": "gpt-5-mini"})
+    assert db.get_settings(conn)["ai_provider"] == "openai"
+    assert db.get_settings(conn)["openai_model"] == "gpt-5-mini"
+
+
 def test_private_note_skipped_by_classifier_query():
     conn = make_conn()
     db.add_note(conn, "public")
@@ -135,3 +142,12 @@ def test_migration_adds_columns_and_backfills_confirmed():
     # existing filed note is back-filled as confirmed so it won't flood the inbox
     assert db.get_note(conn, 1)["confirmed"] == 1
     assert db.recently_filed(conn) == []
+
+
+def test_delete_notes_bulk():
+    conn = make_conn()
+    n1 = db.add_note(conn, "a")
+    n2 = db.add_note(conn, "b")
+    removed = db.delete_notes(conn, [n1, n2])
+    assert removed == 2
+    assert db.list_notes(conn) == []

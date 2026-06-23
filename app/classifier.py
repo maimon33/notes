@@ -57,17 +57,14 @@ SCHEMA = {
 }
 
 
-def classify_one(body: str, spaces: list[dict], client) -> Classification:
+def classify_one(body: str, spaces: list[dict], ask_json) -> Classification:
     space_lines = "\n".join(f"- id={s['id']} {s['name']}: {s['purpose']}" for s in spaces) or "(no spaces yet)"
-    resp = client.messages.create(
-        model="claude-haiku-4-5",
-        max_tokens=400,
-        system=SYSTEM,
-        output_config={"format": {"type": "json_schema", "schema": SCHEMA}},
-        messages=[{"role": "user", "content": f"Spaces:\n{space_lines}\n\nNote:\n{body}"}],
+    data = ask_json(
+        SYSTEM,
+        "Return JSON matching this schema: "
+        + json.dumps(SCHEMA, separators=(",", ":"))
+        + f"\n\nSpaces:\n{space_lines}\n\nNote:\n{body}",
     )
-    text = next(b.text for b in resp.content if b.type == "text")
-    data = json.loads(text)
     ranked = [Suggestion(int(r["space_id"]), float(r["confidence"])) for r in data.get("ranked", [])][:5]
     ns = data.get("new_space") or {}
     new_space = None

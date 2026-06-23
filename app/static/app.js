@@ -260,6 +260,14 @@
   const editorTextType = $("#editorTextType");
   const editorToggleChrome = $("#editorToggleChrome");
   const editorTogglePreview = $("#editorTogglePreview");
+  const editorInfoToggle = $("#editorInfoToggle");
+  const editorInfoPanel = $("#editorInfoPanel");
+  const editorFormatToggle = $("#editorFormatToggle");
+  const editorFormatMenu = $("#editorFormatMenu");
+  const editorPageToggle = $("#editorPageToggle");
+  const editorPageMenu = $("#editorPageMenu");
+  const editorActionsToggle = $("#editorActionsToggle");
+  const editorActionsMenu = $("#editorActionsMenu");
   const EDITOR_CHROME_KEY = "notes.editor.controlsHidden.v2";
   let editingNoteId = null;
   let editingCard = null;
@@ -412,6 +420,25 @@
     }
   }
 
+  function setEditorPopover(toggle, panel, open) {
+    const isOpen = Boolean(open);
+    panel?.classList.toggle("hidden", !isOpen);
+    toggle?.setAttribute("aria-expanded", isOpen ? "true" : "false");
+  }
+
+  function closeEditorPopovers() {
+    setEditorPopover(editorInfoToggle, editorInfoPanel, false);
+    setEditorPopover(editorFormatToggle, editorFormatMenu, false);
+    setEditorPopover(editorPageToggle, editorPageMenu, false);
+    setEditorPopover(editorActionsToggle, editorActionsMenu, false);
+  }
+
+  function toggleEditorPopover(toggle, panel) {
+    const shouldOpen = panel?.classList.contains("hidden");
+    closeEditorPopovers();
+    setEditorPopover(toggle, panel, shouldOpen);
+  }
+
   function wrapSelection(prefix, suffix = "", placeholder = "text") {
     const start = editorTextarea.selectionStart;
     const end = editorTextarea.selectionEnd;
@@ -482,6 +509,7 @@
     editorPreviewVisible = false;
     applyEditorChromeState(editorControlsHidden);
     applyEditorPreviewState(editorPreviewVisible);
+    closeEditorPopovers();
     applyEditorPreferences();
     refreshEditorMeta();
     editorShell.classList.add("open");
@@ -495,6 +523,7 @@
     editingNoteId = null;
     editingCard = null;
     savedBody = "";
+    closeEditorPopovers();
   }
 
   $("#editorCancel")?.addEventListener("click", closeEditor);
@@ -507,9 +536,16 @@
   editorWidth?.addEventListener("change", applyEditorPreferences);
   editorToggleChrome?.addEventListener("click", () => applyEditorChromeState(!editorControlsHidden));
   editorTogglePreview?.addEventListener("click", () => applyEditorPreviewState(!editorPreviewVisible));
+  editorInfoToggle?.addEventListener("click", (e) => { e.stopPropagation(); toggleEditorPopover(editorInfoToggle, editorInfoPanel); });
+  editorFormatToggle?.addEventListener("click", (e) => { e.stopPropagation(); toggleEditorPopover(editorFormatToggle, editorFormatMenu); });
+  editorPageToggle?.addEventListener("click", (e) => { e.stopPropagation(); toggleEditorPopover(editorPageToggle, editorPageMenu); });
+  editorActionsToggle?.addEventListener("click", (e) => { e.stopPropagation(); toggleEditorPopover(editorActionsToggle, editorActionsMenu); });
   editorTextType?.addEventListener("change", () => {
     applyTextType(editorTextType.value);
     editorTextType.value = "body";
+  });
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".editor-popover-wrap")) closeEditorPopovers();
   });
 
   editorSave?.addEventListener("click", async () => {
@@ -533,6 +569,7 @@
 
   $$("[data-transform]").forEach((btn) => btn.addEventListener("click", async () => {
     if (editingNoteId == null) return;
+    closeEditorPopovers();
     const res = await fetch(`/api/notes/${editingNoteId}/transform`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -543,7 +580,92 @@
     editorTextarea.value = data.body || editorTextarea.value;
     refreshEditorMeta();
   }));
-  $$("[data-insert]").forEach((btn) => btn.addEventListener("click", () => insertTemplate(btn.dataset.insert)));
+  $$("[data-insert]").forEach((btn) => btn.addEventListener("click", () => {
+    closeEditorPopovers();
+    insertTemplate(btn.dataset.insert);
+  }));
+
+  // ---- duplicates ----------------------------------------------------------
+  const duplicatesStatus = $("#duplicatesStatus");
+  const duplicatesResults = $("#duplicatesResults");
+
+  function renderDuplicateResults(groups, providerLabel) {
+    if (!duplicatesResults) return;
+    if (!groups.length) {
+      duplicatesResults.innerHTML = `<div class="duplicate-empty">No duplicates spotted right now.</div>`;
+      return;
+    }
+    duplicatesResults.innerHTML = groups.map((group, idx) => {
+      const duplicateIds = group.duplicates.map((note) => note.id).join(",");
+      return `
+        <div class="duplicate-card">
+          <div class="duplicate-head">
+            <div>
+              <div class="duplicate-title">Duplicate set ${idx + 1}</div>
+              <div class="duplicate-meta">${escHtml(providerLabel || (group.source === "ai" ? "AI" : "Heuristic"))} · confidence ${Math.round((group.confidence || 0) * 100)}%</div>
+            </div>
+            <span class="duplicate-pattern">${escHtml(group.pattern || "similar notes")}</span>
+          </div>
+          <div class="duplicate-note">
+            <div class="duplicate-label">Keep note #${group.keep.id}</div>
+            <div class="duplicate-body">${escHtml(group.keep.body || "")}</div>
+          </div>
+          ${group.duplicates.map((note) => `
+            <div class="duplicate-note">
+              <div class="duplicate-label">Remove note #${note.id}</div>
+              <div class="duplicate-body">${escHtml(note.body || "")}</div>
+            </div>
+          `).join("")}
+          <div class="duplicate-actions">
+            <button class="btn btn-primary duplicate-remove-btn" type="button" data-note-ids="${duplicateIds}">Remove duplicates</button>
+            <button class="btn btn-ghost duplicate-jump-btn" type="button" data-note-id="${group.keep.id}">Open kept note</button>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    $$(".duplicate-remove-btn", duplicatesResults).forEach((btn) => btn.addEventListener("click", async () => {
+      const ids = (btn.dataset.noteIds || "").split(",").map((id) => Number(id)).filter(Boolean);
+      if (!ids.length) return;
+      btn.disabled = true;
+      const res = await fetch("/api/duplicates/remove", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note_ids: ids }),
+      });
+      if (!res.ok) {
+        duplicatesStatus.textContent = "Could not remove duplicates.";
+        btn.disabled = false;
+        return;
+      }
+      const data = await res.json();
+      duplicatesStatus.textContent = `Removed ${data.removed || ids.length} duplicate note${(data.removed || ids.length) === 1 ? "" : "s"}.`;
+      location.reload();
+    }));
+
+    $$(".duplicate-jump-btn", duplicatesResults).forEach((btn) => btn.addEventListener("click", () => {
+      const noteId = Number(btn.dataset.noteId);
+      if (noteId) jump(noteId);
+    }));
+  }
+
+  $("#scanDuplicatesBtn")?.addEventListener("click", async () => {
+    if (!duplicatesStatus || !duplicatesResults) return;
+    duplicatesStatus.textContent = "Scanning notes for duplicate patterns…";
+    duplicatesResults.innerHTML = "";
+    const res = await fetch("/api/duplicates/scan", { method: "POST" });
+    if (!res.ok) {
+      duplicatesStatus.textContent = "Duplicate scan failed.";
+      duplicatesResults.innerHTML = `<div class="duplicate-empty">The scan did not finish. Try again.</div>`;
+      return;
+    }
+    const data = await res.json();
+    const sourceLabel = data.provider_label || "Heuristic";
+    duplicatesStatus.textContent = data.count
+      ? `Found ${data.count} duplicate group${data.count === 1 ? "" : "s"} using ${sourceLabel}.`
+      : `No duplicates found${data.provider_label ? ` with ${sourceLabel}` : ""}.`;
+    renderDuplicateResults(data.groups || [], sourceLabel);
+  });
 
   // ---- init ----------------------------------------------------------------
   applyTheme(currentTheme());

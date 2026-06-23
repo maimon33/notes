@@ -3,7 +3,6 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
-import anthropic
 import boto3
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -11,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from app import backup, classifier, config, db, search, transform
+from app import ai, backup, classifier, config, db, duplicates, search, transform
 
 BASE = Path(__file__).parent
 TEMPLATES = Jinja2Templates(directory=str(BASE / "templates"))
@@ -34,6 +33,10 @@ class NoteUpdateRequest(BaseModel):
 class TransformRequest(BaseModel):
     body: str
     mode: str
+
+
+class DuplicateRemoveRequest(BaseModel):
+    note_ids: list[int]
 
 
 def _scope_note_ids(conn, scope: str, space_id: int | None, note_id: int | None) -> list[int]:
@@ -90,6 +93,7 @@ def create_app(conn=None, cfg=None) -> FastAPI:
     app.state.cfg = cfg
     app.state.backup_msg = None
     app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
+    app.state.settings_msg = None
 
     @app.get("/healthz")
     def healthz():
@@ -97,11 +101,15 @@ def create_app(conn=None, cfg=None) -> FastAPI:
 
     @app.get("/")
     def index(request: Request):
+        stored_settings = db.get_settings(conn)
+        runtime_ai = ai.merge_settings(cfg, stored_settings)
         spaces = db.list_spaces(conn)
         for s in spaces:
             s["notes"] = db.notes_in_space(conn, s["id"])
         msg = app.state.backup_msg
         app.state.backup_msg = None
+        settings_msg = app.state.settings_msg
+        app.state.settings_msg = None
         return TEMPLATES.TemplateResponse(
             request,
             "index.html",
@@ -112,8 +120,15 @@ def create_app(conn=None, cfg=None) -> FastAPI:
                 "spaces": spaces,
                 "spaces_by_id": {s["id"]: s for s in spaces},
                 "backup_msg": msg,
+                "settings_msg": settings_msg,
                 "cfg": cfg,
-                "classifier_on": bool(cfg.anthropic_api_key),
+                "classifier_on": bool(runtime_ai.provider),
+                "ai_runtime": runtime_ai,
+                "ai_provider_label": ai.provider_label(runtime_ai.provider),
+                "configured_providers": ai.configured_providers(runtime_ai),
+                "stored_settings": stored_settings,
+                "provider_names": {provider: ai.provider_label(provider) for provider in ai.PROVIDERS},
+                "default_models": ai.DEFAULT_MODELS,
             },
         )
 
@@ -175,6 +190,39 @@ def create_app(conn=None, cfg=None) -> FastAPI:
             app.state.backup_msg = f"Backup failed: {e}"
         return RedirectResponse("/", status_code=303)
 
+    @app.post("/settings/ai")
+    def save_ai_settings(
+        ai_provider: str = Form(""),
+        anthropic_api_key: str = Form(""),
+        openai_api_key: str = Form(""),
+        gemini_api_key: str = Form(""),
+        xai_api_key: str = Form(""),
+        anthropic_model: str = Form(""),
+        openai_model: str = Form(""),
+        gemini_model: str = Form(""),
+        xai_model: str = Form(""),
+    ):
+        db.set_settings(
+            conn,
+            {
+                "ai_provider": ai_provider.strip().lower(),
+                "anthropic_api_key": anthropic_api_key.strip(),
+                "openai_api_key": openai_api_key.strip(),
+                "gemini_api_key": gemini_api_key.strip(),
+                "xai_api_key": xai_api_key.strip(),
+                "anthropic_model": anthropic_model.strip(),
+                "openai_model": openai_model.strip(),
+                "gemini_model": gemini_model.strip(),
+                "xai_model": xai_model.strip(),
+            },
+        )
+        runtime_ai = ai.merge_settings(cfg, db.get_settings(conn))
+        if runtime_ai.provider:
+            app.state.settings_msg = f"AI settings saved. Active provider: {ai.provider_label(runtime_ai.provider)}."
+        else:
+            app.state.settings_msg = "AI settings saved. Add a provider token to turn AI features on."
+        return RedirectResponse("/", status_code=303)
+
     # --- JSON API: search & replace -------------------------------------------------
 
     @app.get("/api/search")
@@ -233,6 +281,28 @@ def create_app(conn=None, cfg=None) -> FastAPI:
             return JSONResponse({"error": f"Invalid regex: {e}"}, status_code=400)
         return search.apply_replace(conn, changes)
 
+    @app.post("/api/duplicates/scan")
+    def api_duplicates_scan():
+        notes = db.list_notes(conn)
+        runtime_ai = ai.merge_settings(cfg, db.get_settings(conn))
+
+        def analyze_with_ai(all_notes, candidates):
+            payload = ai.generate_json(runtime_ai, duplicates.AI_SYSTEM, duplicates.ai_prompt(all_notes, candidates))
+            return payload.get("groups", [])
+
+        groups = duplicates.scan(notes, analyze_with_ai=analyze_with_ai if runtime_ai.provider else None)
+        return {
+            "groups": groups,
+            "provider": runtime_ai.provider,
+            "provider_label": ai.provider_label(runtime_ai.provider),
+            "count": len(groups),
+        }
+
+    @app.post("/api/duplicates/remove")
+    def api_duplicates_remove(req: DuplicateRemoveRequest):
+        removed = db.delete_notes(conn, req.note_ids)
+        return {"ok": True, "removed": removed}
+
     _start_background(app)
     return app
 
@@ -240,19 +310,23 @@ def create_app(conn=None, cfg=None) -> FastAPI:
 def _start_background(app: FastAPI) -> None:
     cfg = app.state.cfg
     conn = app.state.conn
-    if not cfg.anthropic_api_key:
-        return
-    client = anthropic.Anthropic(api_key=cfg.anthropic_api_key)
-
-    def classify_fn(body, spaces):
-        return classifier.classify_one(body, spaces, client)
 
     def loop():
         import time
 
         while True:
             try:
-                classifier.process_inbox(conn, classify_fn, cfg.classify_threshold)
+                runtime_ai = ai.merge_settings(cfg, db.get_settings(conn))
+                if runtime_ai.provider:
+                    classifier.process_inbox(
+                        conn,
+                        lambda body, spaces: classifier.classify_one(
+                            body,
+                            spaces,
+                            lambda system, user: ai.generate_json(runtime_ai, system, user),
+                        ),
+                        cfg.classify_threshold,
+                    )
             except Exception:
                 pass
             time.sleep(cfg.classify_interval_seconds)

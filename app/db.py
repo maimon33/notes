@@ -38,6 +38,10 @@ def init_schema(conn: sqlite3.Connection) -> None:
             confirmed INTEGER NOT NULL DEFAULT 0,
             suggestions TEXT
         );
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        );
         """
     )
     # In-place migration for DBs created before these columns existed.
@@ -126,6 +130,10 @@ def notes_in_space(conn, space_id: int) -> list[dict]:
     ))
 
 
+def list_notes(conn) -> list[dict]:
+    return _rows(conn.execute("SELECT * FROM notes ORDER BY created_at DESC"))
+
+
 # inbox triage groups
 def recently_filed(conn) -> list[dict]:
     return _rows(conn.execute(
@@ -194,4 +202,27 @@ def move_note(conn, note_id: int, space_id: int | None) -> None:
 
 def delete_note(conn, note_id: int) -> None:
     conn.execute("DELETE FROM notes WHERE id=?", (note_id,))
+    conn.commit()
+
+
+def delete_notes(conn, note_ids: list[int]) -> int:
+    if not note_ids:
+        return 0
+    placeholders = ",".join("?" for _ in note_ids)
+    cur = conn.execute(f"DELETE FROM notes WHERE id IN ({placeholders})", tuple(note_ids))
+    conn.commit()
+    return cur.rowcount
+
+
+def get_settings(conn) -> dict[str, str]:
+    return {row["key"]: row["value"] for row in conn.execute("SELECT key, value FROM app_settings")}
+
+
+def set_settings(conn, values: dict[str, str]) -> None:
+    for key, value in values.items():
+        conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, value),
+        )
     conn.commit()
